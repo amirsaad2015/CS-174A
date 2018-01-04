@@ -1,0 +1,1094 @@
+<!-- Graphics Example Code.  index.html - The web page document containing the canvas (drawing surface), that launches your javascript files.  By Garett //-->
+<!DOCTYPE html> <html> <head> <meta charset="UTF-8"/> <link rel="icon" href="assets/fav.ico">
+<script type="text/javascript" src="tinywebgl-ucla.js" ></script>  <!--  Javascript "include" files.  Any code in them gets executed as part of the page loading. //-->
+<script type="text/javascript" src="dependencies.js"   ></script>
+<script type="text/javascript"> "use strict"
+  window.onload = function init()        // ********************* THE ENTRY POINT OF THE WHOLE PROGRAM STARTS HERE *********************
+    { window.contexts = {};                                                            // A global variable, "contexts".  Browsers support up to 16 WebGL contexts per page.
+
+      const scenes  = [ "Tutorial_Animation", "Movement_Controls", "Global_Info_Table" ]; // Register some scenes to the "Canvas_Manager" object -- which WebGL calls
+                                                                                       // upon every time a draw / keyboard / mouse event happens.
+
+      if( eval( "typeof " + scenes[0] ) !== "undefined" )
+      { document.getElementById( "canvases" ).appendChild( Object.assign( document.createElement( "canvas" ), { id: "main_canvas", width: 800, height: 600 } ) );
+        contexts[ "main_canvas" ] = new Canvas_Manager( "main_canvas", Color.of( 0,0,0,1 ), scenes );   // Manage the WebGL canvas.  Second parameter sets background color.
+        for( let c in contexts ) contexts[ c ].render();     // Call render() for each WebGL context on this page.  Then render() will re-queue itself for more calls.
+
+        Code_Manager.display_code( eval( scenes[0] ) );                                  // Display the code for our demo on the page, starting with the first scene in the list.
+        for( let list of [ core_dependencies, all_dependencies ] )
+        document.querySelector( "#class_list" ).rows[2].appendChild( Object.assign( document.createElement( "td" ), {
+          innerHTML: list.reduce( (acc, x) => acc += "<a href='javascript:void(0);' onclick='Code_Manager.display_code(" + x + ")'>" + x + "</a><br>", "" ) } ) );
+        document.getElementsByName( "main_demo_link" )[0].innerHTML = "<a href='javascript:void(0);' onclick='Code_Manager.display_code(" + scenes[0] + ")'>" + scenes[0] + "</a><br>";
+        document.querySelector("#code_display").innerHTML = "Below is the code for the demo that's running:<br>&nbsp;<br>" + document.querySelector("#code_display").innerHTML;
+      }
+
+      document.querySelector("#edit_button").addEventListener('click', () => {
+        code_panel.style.display=class_list.style.display='none'; new_demo_source_code.style.display='block';
+        document.getElementsByName( 'new_demo_code' )[0].value=code_display.dataset.displayed.toString() } )
+      const form = document.forms.namedItem("new_demo_source_code");
+      form.addEventListener('submit', function(event)
+        { if( document.getElementsByName( "finished" )[0].checked )
+            alert( "Your demo will be submitted.  If approved, you will start being asked for a password to make any further updates to it.  This password "
+                 + "will appear right now, below the submit button, and then (assuming submission worked) it will never appear again.  Write it down." );
+          var xhr = new XMLHttpRequest();
+          xhr.open("POST", "/submit-demo?Unapproved", true);
+          xhr.responseType = "json";
+          xhr.onload = function(event)
+          { if (xhr.status != 200) { document.querySelector("#submit_result").textContent = "Error " + xhr.status + " when trying to upload."; return }
+            document.querySelector("#submit_result").textContent = this.response.message;
+            // if( this.response.hide_finished_checkbox ) { document.getElementsByName( "finished" )[0].checked = false; expert_panel.style.display = "none" }
+            if( this.response.show_password  ) document.getElementsByName( "password" )[0] .style.display = "inline";
+            if( this.response.show_overwrite ) document.querySelector( "#overwrite_panel" ).style.display = "inline";
+          };
+          xhr.setRequestHeader("Content-Type", "application/json");
+          xhr.send( JSON.stringify( Array.from( form.elements ).reduce( ( accum, elem ) =>
+            { if( elem.value && !( ['checkbox', 'radio'].includes(elem.type) && !elem.checked ) ) accum[elem.name] = elem.value; return accum }, {} ) ) );
+          event.preventDefault();
+        }, false);
+    }
+
+// Below is the demo you will see when you run the program!
+
+class Tutorial_Animation extends Scene_Component  // An example of a Scene_Component that our class Canvas_Manager can manage.  Like most, this one draws 3D shapes.
+{ constructor( context )
+    { super( context );
+      var shapes = { 'triangle'        : new Triangle(),                            // At the beginning of our program, instantiate all shapes we plan to use,
+                     'strip'           : new Square(),                              // each with only one instance in the graphics card's memory.
+                     'bad_tetrahedron' : new Tetrahedron( false ),                  // For example we would only create one "cube" blueprint in the GPU, but then
+                     'tetrahedron'     : new Tetrahedron( true ),                   // re-use it many times per call to display to get multiple cubes in the scene.
+                     'windmill'        : new Windmill( 10 ),
+                     'cube'            : new Cube(),
+                     'sphere'          : new Subdivision_Sphere(5),
+                     'Tetrahedron'     : new Tetrahedron(),
+                     'front'           : new front(),
+                     'pyramid'         : new Pyramid(),
+                    };
+
+      this.submit_shapes( context, shapes );
+
+       // Place the camera, which is stored in a scratchpad for globals.  Secondly, setup the projection:  The matrix that determines how depth is treated.  It projects 3D points onto a plane.
+      Object.assign( context.globals.graphics_state, { camera_transform: Mat4.translation([ 0, 0,-25 ]), projection_transform: Mat4.perspective( Math.PI/4, context.width/context.height, .1, 1000 ) } );
+
+      // *** Materials: *** Declare new ones as temps when needed; they're just cheap wrappers for some numbers.  1st parameter:  Color (4 floats in RGBA format),
+      // 2nd: Ambient light, 3rd: Diffuse reflectivity, 4th: Specular reflectivity, 5th: Smoothness exponent, 6th: Optional texture object, leave off for un-textured.
+      Object.assign( this, { purplePlastic: context.get_instance( Phong_Model  ).material( Color.of( .9,.5,.9, 1 ), .4, .4, .8, 40 ),
+                             greyPlastic  : context.get_instance( Phong_Model  ).material( Color.of( .5,.5,.5, 1 ), .4, .8, .4, 20 ),   // Smaller exponent means
+                             blueGlass    : context.get_instance( Phong_Model  ).material( Color.of( .5,.5, 1,.2 ), .4, .8, .4, 40 ),   // a bigger shiny spot.
+                             fire         : context.get_instance( Funny_Shader ).material(),
+                             stars        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,1,1 ), .5, .5, .5, 40, context.get_instance( "assets/stars.png" ) ),
+                             military     : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0), 1, .5, .5, 40, context.get_instance( "assets/military.png") ),
+                             steel     : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0), 1, .5, .5, 40, context.get_instance( "assets/steel.png") ),
+                             glass     : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0), 1, .5, .5, 40, context.get_instance( "assets/glass.png") ),
+                             sky     : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0), 1, .5, .5, 40, context.get_instance( "assets/sky.png") ),
+                             grass    : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0), 1, .5, .5, 40, context.get_instance( "assets/grass.png") )} );
+    }
+
+
+    //Draw wings
+    drawWing1(graphics_state, model_transform, wing) {
+      if(wing == 1) {
+        this.shapes.front.draw(graphics_state, model_transform.times(Mat4.translation(Vec.of(2,0,3))).times(Mat4.scale([1,1,3])), this.military);
+
+        return model_transform;
+
+      } else {
+        model_transform = model_transform.times(Mat4.scale([1,1,3]));
+
+        model_transform = model_transform.times(Mat4.translation(Vec.of(2,1,-0.25)));
+
+        model_transform = model_transform.times(Mat4.rotation(Math.PI, Vec.of(0,0,1)));
+
+        model_transform = model_transform.times(Mat4.rotation(Math.PI, Vec.of(0,1,0)));
+
+        this.shapes.front.draw(graphics_state, model_transform, this.military);
+      }
+    }
+
+    drawWarhead(graphics_state, model_transform) {
+      model_transform = model_transform.times(Mat4.scale([1/2,1/.25,1/.25]));
+      model_transform = model_transform.times(Mat4.scale([.5,.5,.5]));
+      model_transform = model_transform.times(Mat4.translation(Vec.of(5,0,0)));
+      this.shapes.sphere.draw(graphics_state, model_transform, this.purplePlastic);
+    }
+
+    drawBody(graphics_state, model_transform) {
+      this.shapes.cube.draw(graphics_state, model_transform, this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(2,0,0))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(4,0,0))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(0,2,0))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(2,2,0))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(4,2,0))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(0,0,2))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(2,0,2))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(4,0,2))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(0,2,2))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(2,2,2))), this.military);
+
+      this.shapes.cube.draw(graphics_state, model_transform.times( Mat4.translation(Vec.of(4,2,2))), this.military);
+    }
+
+    drawCockpit(graphics_state, model_transform) {
+      model_transform = model_transform.times(Mat4.translation(Vec.of(5,-1,3)));
+      model_transform = model_transform.times(Mat4.scale([4,4,4]));
+      model_transform = model_transform.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+      this.shapes.front.draw(graphics_state, model_transform, this.glass);
+    }
+
+    drawtopProp(graphics_state, topProp) {
+      var t = graphics_state.animation_time/1000
+      topProp = topProp.times( Mat4.rotation(10*t, Vec.of(0,1,0)));
+      topProp = topProp.times( Mat4.scale([15,.5,1]));
+      topProp = topProp.times( Mat4.translation(Vec.of(0,3,0)));
+      this.shapes.cube.draw(graphics_state, topProp, this.steel);
+    }
+
+    drawTail(graphics_state, tail) {
+      tail = tail.times( Mat4.scale([.5,.5,.5]));
+      tail = tail.times( Mat4.translation(Vec.of(-3,2,2)));
+      this.shapes.cube.draw(graphics_state, tail, this.steel);
+
+      tail = tail.times( Mat4.translation(Vec.of(-2,0,0)));
+      this.shapes.cube.draw(graphics_state, tail, this.steel);
+
+      tail = tail.times( Mat4.translation(Vec.of(-2,0,0)));
+      this.shapes.cube.draw(graphics_state, tail, this.steel);
+
+      tail = tail.times( Mat4.translation(Vec.of(-2,0,0)));
+      this.shapes.cube.draw(graphics_state, tail, this.steel);
+
+      tail = tail.times( Mat4.translation(Vec.of(-2,0,0)));
+      this.shapes.cube.draw(graphics_state, tail, this.steel);
+
+      tail = tail.times( Mat4.translation(Vec.of(-2,0,0)));
+      this.shapes.cube.draw(graphics_state, tail, this.steel);
+
+      return tail;
+    }
+
+    drawTailWing(graphics_state, tailWing) {
+      tailWing = tailWing.times( Mat4.scale([1/.5,1/.5,1/.5]));
+      tailWing = tailWing.times( Mat4.translation(Vec.of(-.5,.5,.5)));
+      tailWing = tailWing.times( Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+      this.shapes.front.draw(graphics_state, tailWing, this.military);
+    }
+
+    drawPropHolder(graphics_state, propHolder) {
+      propHolder = propHolder.times( Mat4.scale([1/.5, 1/.5, 1/.5]));
+      propHolder = propHolder.times( Mat4.scale([.25,.25,.25]));
+      propHolder = propHolder.times( Mat4.translation(Vec.of(0,0,3)));
+      this.shapes.cube.draw(graphics_state, propHolder, this.greyPlastic);
+      return propHolder;
+    }
+
+    drawProp(graphics_state, prop) {
+      var t = graphics_state.animation_time/1000;
+      prop = prop.times( Mat4.rotation(15*t, Vec.of(0,0,1)));
+      prop = prop.times( Mat4.scale([6,.5,.5]));
+      prop = prop.times( Mat4.translation(Vec.of(0,0,3)));
+      this.shapes.cube.draw(graphics_state, prop, this.greyPlastic);
+    }
+
+  display( graphics_state )
+    { var model_transform = Mat4.identity();             // We begin with a brand new model_transform every frame.
+
+      // *** Lights: *** Values of vector or point lights over time.  Two different lights *per shape* supported by Phong_Shader; more requires changing a number in the vertex
+      graphics_state.lights = [ new Light( Vec.of(  30,  30,  34, 1 ), Color.of( 0, .4, 0, 1 ), 100000 ),      // shader.  Arguments to construct a Light(): Light source position
+                                new Light( Vec.of( -10, -20, -14, 0 ), Color.of( 1, 1, .3, 1 ), 100    ) ];    // or vector (homogeneous coordinates), color, and size.
+
+
+
+      var t = graphics_state.animation_time/1000,   tilt_spin   = Mat4.rotation( 12*t, Vec.of(          .1,          .8,             .1 ) ),
+                                                    funny_orbit = Mat4.rotation(  2*t, Vec.of( Math.cos(t), Math.sin(t), .7*Math.cos(t) ) ),
+                                                    normal_spin = Mat4.rotation( 12*t, Vec.of(0,1,0));
+
+      let pyramid = model_transform;
+      let pyramid1 = model_transform;
+
+      let proj = model_transform;
+
+      let ground = model_transform;
+      let sky1 = model_transform;
+      let sky2 = model_transform;
+      let sky3 = model_transform;
+      let sky4 = model_transform;
+
+      //Create world
+      sky1 = sky1.times(Mat4.scale([100,100,1]));
+      sky1 = sky1.times(Mat4.translation(Vec.of(0,0,-100)));
+      this.shapes.cube.draw(graphics_state, sky1, this.sky);
+
+      sky2 = sky2.times(Mat4.scale([1,100,100]));
+      sky2 = sky2.times(Mat4.translation(Vec.of(-100,0,0)));
+      this.shapes.cube.draw(graphics_state, sky2, this.sky);
+
+      sky3 = sky3.times(Mat4.scale([100,100,1]));
+      sky3 = sky3.times(Mat4.translation(Vec.of(0,0,100)));
+      this.shapes.cube.draw(graphics_state, sky3, this.sky);
+
+      sky4 = sky4.times(Mat4.scale([1,100,100]));
+      sky4 = sky4.times(Mat4.translation(Vec.of(100,0,0)));
+      this.shapes.cube.draw(graphics_state, sky4, this.sky);
+
+
+      ground = ground.times(Mat4.translation(Vec.of(0,0,0)));
+      ground = ground.times(Mat4.scale([100,1,100]));
+      this.shapes.cube.draw(graphics_state, ground, this.grass);
+
+      pyramid1 = pyramid1.times(Mat4.scale([3,3,3]));
+      pyramid1 = pyramid1.times(Mat4.translation(Vec.of(10,0,-10)));
+      pyramid1 = pyramid1.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+      this.shapes.pyramid.draw(graphics_state, pyramid1, this.steel);
+
+      for(let i of [1,2,3,4,5,6,7,8,9,10]) {
+        pyramid1 = pyramid1.times(Mat4.translation(Vec.of(0,-2,0)));
+        this.shapes.pyramid.draw(graphics_state, pyramid1, this.steel);
+      }
+
+      //Keep track of time for scenes
+      var scene1 = graphics_state.animation_time;
+
+      var scene2 = graphics_state.animation_time - 2000;
+
+      var scene3 = graphics_state.animation_time - 4000;
+
+      var scene4 = graphics_state.animation_time - 6000;
+
+      var scene5 = graphics_state.animation_time - 8000;
+
+      var scene6 = graphics_state.animation_time - 12000;
+
+      var scene7 = graphics_state.animation_time - 14000;
+
+      var scene8 = graphics_state.animation_time - 19000;
+
+      var scene9 = graphics_state.animation_time - 22000;
+
+
+      if(scene1 > 2000) {
+        scene1 = -1;
+      }
+      if(scene2 > 2000) {
+        scene2 = -1;
+      }
+      if(scene3 > 2000) {
+        scene3 = -1;
+      }
+      if(scene4 > 2000) {
+        scene4 = -1;
+      }
+      if(scene5 > 4000) {
+        scene5 = -1;
+      }
+      if(scene6 > 2000) {
+        scene6 = -1;
+      }
+      if(scene7 > 5000) {
+        scene7 = -1;
+      }
+      if(scene8 > 3000) {
+        scene8 = -1;
+      }
+
+
+      if(scene1 > 0) {
+        var cam = Mat4.look_at( Vec.of( -80,2,0), Vec.of(0,0,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+
+      if(scene2 > 0) {
+        var cam = Mat4.look_at( Vec.of( -80,-6*Math.cos(t) + 8,0), Vec.of(0,-6*Math.cos(t) + 8,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(0,-6*Math.cos(t) + 8,0)));
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+
+      if(scene3 > 0) {
+        model_transform = model_transform.times( Mat4.translation(Vec.of(0,-6*Math.cos(t) + 8,0)));
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        var cam = Mat4.look_at( Vec.of( 60,4,0), Vec.of(0,0,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+
+      if(scene4 > 0) {
+        var cam = Mat4.look_at( Vec.of( -80,4,-90*Math.cos(t)), Vec.of(0,0,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(0,-6*Math.cos(t) + 8,0)));
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+      if(scene5 > 0) {
+        var cam = Mat4.look_at( Vec.of( -55,-6*Math.cos(t) + 8,-2), Vec.of(0,-6*Math.cos(t) + 8,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(0,-6*Math.cos(t) + 8,0)));
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+      if(scene6 > 0) {
+        var cam = Mat4.look_at( Vec.of( 70,10,30), Vec.of(0,0,0), Vec.of( 0,1,0));
+      //  var cam = Mat4.look_at( Vec.of( -60*Math.cos(t),-6*Math.cos(t) + 8,0), Vec.of(0,-6*Math.cos(t) + 8,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(0,-6*Math.cos(t) + 8,0)));
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+        let proj = missile;
+
+        //proj = proj.times(Mat4.translation(Vec.of(10,0,0)))
+
+        proj = proj.times(Mat4.translation(Vec.of(60*Math.cos(t), 0, 0)));
+
+        this.shapes.cube.draw(graphics_state, proj, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+
+      if(scene7 > 0) {
+        var cam = Mat4.look_at( Vec.of( 70,10,30), Vec.of(0,0,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        var t = graphics_state.animation_time/1000;
+
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(0,-6*Math.cos(t) + 8,0)));
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        model_transform = model_transform.times( Mat4.rotation(20*t, Vec.of(0,1,0)));
+
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+
+        this.shapes.cube.draw(graphics_state, proj, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+      if(scene8 > 0) {
+        var cam = Mat4.look_at( Vec.of( 70,10,30), Vec.of(0,0,0), Vec.of( 0,1,0));
+        graphics_state.camera_transform = cam;
+
+        var t = graphics_state.animation_time/1000;
+
+
+        model_transform = model_transform.times( Mat4.translation(Vec.of(-50,2,0)));
+
+        model_transform = model_transform.times( Mat4.rotation(Math.PI/4, Vec.of(1,0,0)));
+        //Create tank
+        pyramid = pyramid.times(Mat4.translation(Vec.of(40,1,0)));
+        this.drawBody(graphics_state, pyramid);
+
+        let cannon = pyramid;
+        cannon = cannon.times(Mat4.scale([.5,.5,.5]));
+
+        cannon = cannon.times(Mat4.translation(Vec.of(5,7,2)));
+        cannon = cannon.times(Mat4.rotation(-Math.PI/32, Vec.of(0,0,1)));
+
+        this.shapes.cube.draw(graphics_state, cannon, this.steel);
+
+        for(let i of [1,2,3,4,5,6]) {
+          cannon = cannon.times(Mat4.translation(Vec.of(-2,0,0)));
+          this.shapes.cube.draw(graphics_state, cannon, this.military);
+        }
+
+        let topPyramid = pyramid;
+        topPyramid = topPyramid.times(Mat4.scale([2,2,2]));
+        topPyramid = topPyramid.times(Mat4.translation(Vec.of(1.5,1.5,.5)));
+        topPyramid = topPyramid.times(Mat4.rotation(-Math.PI/2, Vec.of(1,0,0)));
+        this.shapes.pyramid.draw(graphics_state, topPyramid, this.steel);
+
+        //this.shapes.pyramid.draw(graphics_state, pyramid, this.steel);
+
+        //model_transform = model_transform.times( Mat4.translation(Vec.of(0, Math.sin(t), 0)));
+
+        //Create body
+        let tail = model_transform;
+        let top = model_transform;
+        let wing1 = model_transform;
+        let wing2 = model_transform;
+
+        //Draw wings
+        let missile = this.drawWing1(graphics_state, wing1, 1);
+
+        this.drawWing1(graphics_state, wing2, 2);
+
+        //Draw missiles
+        missile = missile.times(Mat4.scale([2,.25,.25]));
+        missile = missile.times(Mat4.translation(Vec.of(1,-1,20)))
+        this.shapes.cube.draw(graphics_state, missile, this.steel);
+
+        let missile0 = missile
+        missile0 = missile0.times(Mat4.translation(Vec.of(0,0,-30)));
+        this.shapes.cube.draw(graphics_state, missile0, this.steel);
+
+
+        this.shapes.cube.draw(graphics_state, proj, this.steel);
+
+        let warhead0 = missile
+        this.drawWarhead(graphics_state, warhead0);
+
+        let warhead1 = missile0;
+        this.drawWarhead(graphics_state, warhead1);
+
+        //Draw main body
+        this.drawBody(graphics_state, model_transform);
+
+        //Draw cockpit
+        let cockpit = model_transform;
+        this.drawCockpit(graphics_state, cockpit);
+
+        //Create top propeller
+
+        //Draw top propeller holder
+        top = top.times( Mat4.scale([.5,.5,.5]));
+        top = top.times( Mat4.translation(Vec.of(4,7,2)));
+        this.shapes.cube.draw(graphics_state, top, this.steel);
+
+        let topProp = top;
+
+        //prop = prop.times( Mat4.rotation(10*t, Vec.of(0,0,1)));
+        this.drawtopProp(graphics_state, topProp);
+
+        //Draw tail
+
+        let tailWing = this.drawTail(graphics_state, tail);
+        let propHolder = tailWing;
+        //Draw tail wing
+        this.drawTailWing(graphics_state, tailWing);
+
+        //Create tail propeller holder
+        let prop = this.drawPropHolder(graphics_state, propHolder);
+        this.drawProp(graphics_state, prop);
+      }
+    }
+}
+</script>
+<style>
+  table { border-collapse: collapse; display:block; overflow-x: auto; }
+  table, th, td { border: 2px solid black; vertical-align: top; white-space: nowrap }
+  th, td { overflow: hidden;  }
+  button { position: relative; background-color: #4C9F50; color: white; padding: 6px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); transition: background-color .3s, transform .3s }
+  button:hover, button:focus { transform: scale(1.2); color:gold }
+  .dropdown { display:inline-block }
+  .dropdown-content { display: none; position: absolute; background-color: #f9f9f9; min-width: 100px; overflow: auto; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2) }
+  .dropdown-content a { color: black; padding: 4px 4px; display: block }
+  .dropdown a:hover { background-color: #f1f1f1 }
+  .show { display:inline-block }
+</style>
+</head><body>
+<div id="explanation_section"></div>
+<div id="canvases"></div>
+<table id="control_buttons" class="dropdown" style="display:block; width: 70%;  border: 0px; margin: 0 0 50px 0"><tr></tr></table>
+<div id="code_panel" style="font-family: monospace; white-space: pre; margin: 50px 0" >
+  <div id="code_display"  data-displayed="" ></div>
+  <button id="edit_button" style="display:none">Start editing</button>
+  <table id="class_list" class="dropdown" style="display:block; border: 0px; border-spacing: 10px " >
+    <tr><td colspan="2">Click below to navigate through all classes that are defined. <br>&nbsp;<br>Main demo: <span name="main_demo_link"></span></td></tr>
+    <tr style="text-align:center"><td>tinywebgl-ucla.js</td><td>dependencies.js</td></tr><tr></tr></table>
+</div>
+<form name="new_demo_source_code" style="display:none">
+  <p style="margin: 50px 0"><i><b>What can I put here?</b></i>  A JavaScript class, with any valid JavaScript inside.  Your code can use classes from this demo, or from ANY demo on the
+  encyclopedia of code --  the dependencies will automatically be pulled in to run your demo!<br></p>
+  <textarea rows="30" cols="140" name="new_demo_code"></textarea><br>
+  <div id="submit_result" style="margin: 10px 0"></div>
+  <button type="submit" style="margin: 0px 50px 0px 0px">Save as new webpage</button>
+  <input type="text" name="author"   placeholder="Author name">
+  <input type="text" name="password" placeholder="Password" style="display:none">
+  <span id="overwrite_panel" style="display:none"><label>Overwrite?<input type="checkbox" name="overwrite" autocomplete="off"></label></span>
+  <span id="beginner_panel"><label>Beginner Mode<input type="checkbox" checked onchange="document.querySelector('#expert_panel').style.display='block'; beginner_panel.style.display='none'"></label></span>
+  <div id="expert_panel" style="display:none;"><label><input type="checkbox" name="finished" autocomplete="off">
+    Optional:  This demo is finished; consider it for public listing on the main page.
+    I believe that this demo is the one true way to minimalistically do what its name says.
+    The code's readability and structure are so good as to maximize how easy it is to memorize it.
+    </label></div>
+</form>
+</body></html>
